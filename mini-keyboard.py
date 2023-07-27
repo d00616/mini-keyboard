@@ -30,22 +30,19 @@ class BasedIntParamType(click.ParamType):
 BASED_INT = BasedIntParamType()
 
 @click.command(help="Replacement for MINI KeyBoard v02.1.1")
-@click.option("-V", "--vendor-id", "vendor_id", type=BASED_INT, default="0x1189", help="USB Vendor ID")
-@click.option("-P", "--product-id", "product_id", type=BASED_INT, default="0x8890", help="USB Product ID")
-@click.option("-E", "--edpoint-id", "endpoint_id", type=BASED_INT, default="0x8890", help="USB End")
+@click.option("-V", "--vendor-id", "vendor_id", type=BASED_INT, default="0x1189", help="USB Vendor ID default: 0x1189")
+@click.option("-P", "--product-id", "product_id", type=BASED_INT, default="0x8890", help="USB Product ID default: 0x8890")
+@click.option("-E", "--edpoint-id", "endpoint_addr", type=BASED_INT, default="0x02", help="USB Endpoint Address default: 0x02")
 @click.option("-l", "--led-mode", "led_mode", type=click.INT, default=None, help="LED Mode 0,1,2")
 @click.option("-k", "--key", "key_number", type=click.INT, default=None, help="Key to program")
 
-def main(vendor_id, product_id, endpoint_id, led_mode, key_number):
+def main(vendor_id, product_id, endpoint_addr, led_mode, key_number):
     # find keyboard
     dev = usb.core.find(idVendor=vendor_id, idProduct=product_id)
 
     # was it found?
     if dev is None:
         raise ValueError('Device not found')
-
-    # Select configuration endpoint (0x2)
-    ep = dev[0].interfaces()[1].endpoints()[0]
 
     # Detach, if required
     attach_kernel_driver = []
@@ -64,16 +61,24 @@ def main(vendor_id, product_id, endpoint_id, led_mode, key_number):
     except usb.core.USBError as e:
         raise DeviceException('Could not set configuration: %s' % str(e))
 
-    eaddr = ep.bEndpointAddress
+    # Configure Key
+    if key_number is not None:
+        # Set device into configuraiton mode
+        dev.write(endpoint_addr, [0x03,0xa1,0x01])
+
+        # Disable configuration mode
+        dev.write(endpoint_addr, [0x03,0xaa,0xaa])
+
+
 
     # Configure LED Mode
     if led_mode is not None:
         # Set device into configuraiton mode
-        dev.write(eaddr, [0x03,0xa1,0x01])
+        dev.write(endpoint_addr, [0x03,0xa1,0x01])
         # Configure LED
-        dev.write(eaddr, [0x03,0xb0,0x18,led_mode])
+        dev.write(endpoint_addr, [0x03,0xb0,0x18,led_mode])
         # Disable configuration mode
-        dev.write(eaddr, [0x03,0xaa,0xa1])
+        dev.write(endpoint_addr, [0x03,0xaa,0xa1])
 
 
     # Restore kernel driver
