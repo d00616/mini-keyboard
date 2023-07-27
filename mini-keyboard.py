@@ -26,17 +26,35 @@ class BasedIntParamType(click.ParamType):
             return int(value, 10)
         except ValueError:
             self.fail(f"{value!r} is not a valid integer", param, ctx)
-
 BASED_INT = BasedIntParamType()
 
+
+def usb_write(dev, endpoint_addr, data):
+    if True:
+        hex = []
+        for d in data:
+            hex.append("0x%02x" % d)
+        print("USB Write: EP=0x%02x DATA=%s" % (endpoint_addr, ','.join(hex)))
+    dev.write(endpoint_addr,data)
+
+
 @click.command(help="Replacement for MINI KeyBoard v02.1.1")
+
 @click.option("-V", "--vendor-id", "vendor_id", type=BASED_INT, default="0x1189", help="USB Vendor ID default: 0x1189")
 @click.option("-P", "--product-id", "product_id", type=BASED_INT, default="0x8890", help="USB Product ID default: 0x8890")
 @click.option("-E", "--edpoint-id", "endpoint_addr", type=BASED_INT, default="0x02", help="USB Endpoint Address default: 0x02")
-@click.option("-l", "--led-mode", "led_mode", type=click.INT, default=None, help="LED Mode 0,1,2")
-@click.option("-k", "--key", "key_number", type=click.INT, default=None, help="Key to program")
 
-def main(vendor_id, product_id, endpoint_addr, led_mode, key_number):
+@click.option("-l", "--led-mode", "led_mode", type=click.INT, default=None, help="LED Mode 0,1,2")
+
+@click.option("-k", "--key", "key_number", type=click.INT, default=None, help="Key to program")
+@click.option("-l", "--layer", "key_layer", type=click.INT, default=1, help="Key layer [1-3]")
+@click.option("-m", "--key-mode", "key_mode", type=click.STRING, default="key", help="Key Mode: key,mouse,multimedia")
+
+@click.option("--mouse-buttons", "mouse_button", type=click.STRING, default='', help="Mouse Button(s): LEFT,MIDDLE,RIGHT")
+@click.option("--mouse-move-x", "mouse_move_x", type=click.IntRange(-127,127), default=0, help="Mouse movement horizontal -127..0..127")
+@click.option("--mouse-move-y", "mouse_move_y", type=click.IntRange(-127,127), default=0, help="Mouse movement vertical -127..0..127")
+
+def main(vendor_id, product_id, endpoint_addr, led_mode, key_number, key_layer, key_mode, mouse_button, mouse_move_x, mouse_move_y):
     # find keyboard
     dev = usb.core.find(idVendor=vendor_id, idProduct=product_id)
 
@@ -61,13 +79,48 @@ def main(vendor_id, product_id, endpoint_addr, led_mode, key_number):
     except usb.core.USBError as e:
         raise DeviceException('Could not set configuration: %s' % str(e))
 
+
+    # Calculate some values
+    key_layer = key_layer << 4
+
     # Configure Key
     if key_number is not None:
         # Set device into configuraiton mode
-        dev.write(endpoint_addr, [0x03,0xa1,0x01])
+        usb_write(dev, endpoint_addr, [0x03,0xa1,0x01])
+
+        if key_mode == 'key':
+            for s in range(8):
+                usb_write(dev, endpoint_addr, [0x03,key_number, key_layer + 0x01,0x06, s, 0x10, 0x00, 0x00])
+                usb_write(dev, endpoint_addr, [0x03,key_number+1,0x11,0x06, s, 0x20, 0x00, 0x00])
+                usb_write(dev, endpoint_addr, [0x03,key_number+2,0x11,0x06, s, 0x40, 0x00, 0x00])
+                usb_write(dev, endpoint_addr, [0x03,key_number+3,0x11,0x06, s, 0x80, 0x00, 0x00])
+
+        if key_mode == 'mouse':
+            # Calculate Buttons
+            # 0x01    Left Click
+            # 0x02    Right Click
+            # 0x04    Middle Click
+            btn = 0
+            btns = mouse_button.lower().split(',')
+            if 'left' in btns:
+                btn = btn + 0x01
+            if 'right' in btns:
+                btn = btn + 0x02
+            if 'middle' in btns:
+                btn = btn + 0x04
+            if mouse_move_x < 0:
+                mouse_move_x = 255-abs(mouse_move_x)
+            if mouse_move_y < 0:
+                mouse_move_y = 255-abs(mouse_move_y)
+            usb_write(dev, endpoint_addr, [0x03,key_number , key_layer + 0x03, btn, mouse_move_x, mouse_move_y, 0x00])
+
+        if key_mode == 'multimedia':
+            #
+            usb_write(dev, endpoint_addr, [0x03,key_number , key_layer + 0x02, 0xe2, 0x00])
+
 
         # Disable configuration mode
-        dev.write(endpoint_addr, [0x03,0xaa,0xaa])
+        usb_write(dev,endpoint_addr, [0x03,0xaa,0xaa])
 
 
 
