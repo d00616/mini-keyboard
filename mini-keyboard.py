@@ -3,6 +3,7 @@
 import click
 import usb.core
 import usb.util
+import json
 
 class DeviceException(Exception):
     pass
@@ -28,6 +29,28 @@ class BasedIntParamType(click.ParamType):
             self.fail(f"{value!r} is not a valid integer", param, ctx)
 BASED_INT = BasedIntParamType()
 
+class ListOfBasedIntParamType(click.ParamType):
+    name = "list"
+
+    def convert(self, value, param, ctx):
+        output = []
+        for val in value.split(','):
+            if isinstance(val, int):
+                output.append(val)
+                continue
+
+            try:
+                if val[:2].lower() == "0x": # hex
+                    output.append(int(val[2:], 16))
+                elif val[:1] == "0": # octal
+                    output.append(int(val,8))
+                else:
+                    output.append(int(val))
+            except ValueError:
+                self.fail(f"{value!r} is not a valid list of integer", param, ctx)
+
+        return(output)
+LIST_OF_BASED_INT = ListOfBasedIntParamType()
 
 def usb_write(dev, endpoint_addr, data):
     if True:
@@ -50,11 +73,13 @@ def usb_write(dev, endpoint_addr, data):
 @click.option("-l", "--layer", "key_layer", type=click.INT, default=1, help="Key layer [1-3]")
 @click.option("-m", "--key-mode", "key_mode", type=click.STRING, default="key", help="Key Mode: key,mouse,multimedia")
 
+@click.option("--raw-data", "raw_data", type=LIST_OF_BASED_INT, default=None, help="Comma seperated data send to key. Expect 1 byte for multimedia, 3 Bytes four mouse and 1..8 Words for Keys.")
+
 @click.option("--mouse-buttons", "mouse_button", type=click.STRING, default='', help="Mouse Button(s): LEFT,MIDDLE,RIGHT")
 @click.option("--mouse-move-x", "mouse_move_x", type=click.IntRange(-127,127), default=0, help="Mouse movement horizontal -127..0..127")
 @click.option("--mouse-move-y", "mouse_move_y", type=click.IntRange(-127,127), default=0, help="Mouse movement vertical -127..0..127")
 
-def main(vendor_id, product_id, endpoint_addr, led_mode, key_number, key_layer, key_mode, mouse_button, mouse_move_x, mouse_move_y):
+def main(vendor_id, product_id, endpoint_addr, led_mode, key_number, key_layer, key_mode, mouse_button, mouse_move_x, mouse_move_y, raw_data):
     # find keyboard
     dev = usb.core.find(idVendor=vendor_id, idProduct=product_id)
 
@@ -89,17 +114,17 @@ def main(vendor_id, product_id, endpoint_addr, led_mode, key_number, key_layer, 
         usb_write(dev, endpoint_addr, [0x03,0xa1,0x01])
 
         if key_mode == 'key':
-            for s in range(8):
-                usb_write(dev, endpoint_addr, [0x03,key_number, key_layer + 0x01,0x06, s, 0x10, 0x00, 0x00])
-                usb_write(dev, endpoint_addr, [0x03,key_number+1,0x11,0x06, s, 0x20, 0x00, 0x00])
-                usb_write(dev, endpoint_addr, [0x03,key_number+2,0x11,0x06, s, 0x40, 0x00, 0x00])
-                usb_write(dev, endpoint_addr, [0x03,key_number+3,0x11,0x06, s, 0x80, 0x00, 0x00])
+            l = len(raw_data)-1
+            for n in range(len(raw_data)):
+                high_byte = raw_data[n] >> 8
+                low_byte = raw_data[n] & 0xff
+                usb_write(dev, endpoint_addr, [0x03,key_number, key_layer + 0x01,l, n, high_byte, low_byte])
 
         if key_mode == 'mouse':
             # Calculate Buttons
-            # 0x01    Left Click
-            # 0x02    Right Click
-            # 0x04    Middle Click
+            #   0x01    Left Click
+            #   0x02    Right Click
+            #   0x04    Middle Click
             btn = 0
             btns = mouse_button.lower().split(',')
             if 'left' in btns:
@@ -115,9 +140,16 @@ def main(vendor_id, product_id, endpoint_addr, led_mode, key_number, key_layer, 
             usb_write(dev, endpoint_addr, [0x03,key_number , key_layer + 0x03, btn, mouse_move_x, mouse_move_y, 0x00])
 
         if key_mode == 'multimedia':
-            #
-            usb_write(dev, endpoint_addr, [0x03,key_number , key_layer + 0x02, 0xe2, 0x00])
-
+            # Expects
+            #  1. Byte: Key
+            #   0xb5	Next Song
+            #   0xb6	Prev Song
+            #   0xcd	Play/Pause
+            #   0xe2	Mute
+            #   0xe9	Volume +
+            #   0xea	Volume -
+            #  2. Byte: 0x00
+            usb_write(dev, endpoint_addr, [0x03,key_number , key_layer + 0x02] + raw_data)
 
         # Disable configuration mode
         usb_write(dev,endpoint_addr, [0x03,0xaa,0xaa])
