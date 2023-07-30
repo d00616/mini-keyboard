@@ -149,6 +149,7 @@ def main(vendor_id, product_id, endpoint_addr, led_mode, key_number, key_layer, 
             #   0xe9	Volume +
             #   0xea	Volume -
             #  2. Byte: 0x00
+            raw_data.append(0)
             usb_write(dev, endpoint_addr, [0x03,key_number , key_layer + 0x02] + raw_data)
 
         # Disable configuration mode
